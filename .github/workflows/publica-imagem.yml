@@ -1,0 +1,56 @@
+name: Publica imagem no GHCR
+
+# Constroi e publica a imagem a cada push no main. A tag e o hash do commit,
+# para que sempre se saiba qual codigo esta rodando — antes disto, a imagem em
+# producao nao declarava de qual commit veio.
+#
+# Para implantar: troque a tag na stack do Portainer pela que este workflow
+# publicar. A VM nao atualiza sozinha, e isso e proposital.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    # Nenhum PAT envolvido: o GITHUB_TOKEN e gerado a cada execucao e expira
+    # ao final dela.
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=sha,format=long,prefix=sha-
+            type=raw,value=latest
+          # Grava a origem na propria imagem. Permite descobrir o commit a
+          # partir do container em producao, sem depender de memoria.
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
